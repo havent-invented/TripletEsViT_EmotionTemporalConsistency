@@ -4,7 +4,8 @@ import torch
 import torch.nn.functional as F
 from functools import partial
 from torch import nn, einsum
-from torch._six import container_abcs
+#from torch._six import container_abcs
+import collections.abc as container_abcs
 
 import numpy as np
 from einops import rearrange, repeat

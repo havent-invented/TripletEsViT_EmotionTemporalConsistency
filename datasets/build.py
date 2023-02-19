@@ -68,6 +68,9 @@ def build_dataloader(args, is_train=True):
         sampler = DistributedChunkSampler(
             dataset, shuffle=True, chunk_sizes=chunk_sizes
         )
+    else:
+        sampler = None 
+
 
     data_loader = torch.utils.data.DataLoader(
         dataset,
@@ -217,14 +220,14 @@ class DataAugmentationDINO(object):
 
         # first global crop
         self.global_transfo1 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=transforms.InterpolationMode("bicubic")),
             flip_and_color_jitter,
             utils.GaussianBlur(1.0),
             normalize,
         ])
         # second global crop
         self.global_transfo2 = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=Image.BICUBIC),
+            transforms.RandomResizedCrop(224, scale=global_crops_scale, interpolation=transforms.InterpolationMode("bicubic")),
             flip_and_color_jitter,
             utils.GaussianBlur(0.1),
             utils.Solarization(0.2),
@@ -243,7 +246,7 @@ class DataAugmentationDINO(object):
         self.local_transfo = []
         for l_size in local_crops_size:
             self.local_transfo.append(transforms.Compose([
-                transforms.RandomResizedCrop(l_size, scale=local_crops_scale, interpolation=Image.BICUBIC),
+                transforms.RandomResizedCrop(l_size, scale=local_crops_scale, interpolation=transforms.InterpolationMode("bicubic")),
                 flip_and_color_jitter,
                 utils.GaussianBlur(p=0.5),
                 normalize,

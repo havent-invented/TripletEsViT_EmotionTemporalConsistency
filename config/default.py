@@ -285,7 +285,9 @@ def update_config(config, args):
     config.merge_from_list(args.opts)
     file_name, _ = op.splitext(op.basename(args.cfg))
     config.NAME = file_name + config.NAME
-    config.RANK = args.rank
+
+    args.rank = 1
+    config.RANK = 1#args.rank
 
     if 'timm' == config.TRAIN.LR_SCHEDULER.METHOD:
         config.TRAIN.LR_SCHEDULER.ARGS.epochs = config.TRAIN.END_EPOCH

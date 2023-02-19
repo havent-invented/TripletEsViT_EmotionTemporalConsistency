@@ -73,6 +73,8 @@ print(args)
 
 # config_file = args.config_file
 # job_name = os.path.basename(args.config_file)[:-5] + "_" + args.job_name
+master_addr = 89
+master_port = 89
 
 if "OMPI_COMM_WORLD_SIZE" in os.environ:
     if args.num_nodes != int(os.environ["OMPI_COMM_WORLD_SIZE"]):
@@ -87,6 +89,7 @@ if args.num_nodes > 1:
     args.node_rank = int(os.environ.get('OMPI_COMM_WORLD_RANK')) if 'OMPI_COMM_WORLD_RANK' in os.environ else args.node_rank
     print("node rank: ", args.node_rank)
     # get ip address and port for master process, which the other slave processes will use to communicate
+    
     master_addr = os.environ['MASTER_ADDR']
     master_port = os.environ['MASTER_PORT']
     print("master address-port: {}-{}".format(master_addr, master_port))
@@ -178,5 +181,5 @@ else:
                 pretrained_weights_ckpt=args.pretrained_weights_ckpt,
                 aug_opt=args.aug_opt
             )
-
+print(cmd)
 subprocess.run(cmd, shell=True, check=True)

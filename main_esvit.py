@@ -49,6 +49,8 @@ from config import save_config
 
 from datasets import build_dataloader
 
+
+
 torchvision_archs = sorted(name for name in torchvision_models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(torchvision_models.__dict__[name]))
@@ -59,6 +61,7 @@ def get_args_parser():
     parser.add_argument('--cfg',
                         help='experiment configure file name',
                         type=str)
+
 
     # Model parameters
     parser.add_argument('--arch', default='deit_small', type=str,
@@ -204,6 +207,12 @@ def get_args_parser():
                         help="Modify config options using the command-line",
                         default=None,
                         nargs=argparse.REMAINDER)    
+
+
+
+
+    parser.add_argument('--contrastive', type=utils.bool_flag, default=False, help="""Whether or not to use contrastive self-supervised learning.""")  
+
     return parser
 
 
@@ -223,11 +232,11 @@ def train_esvit(args):
     # setup mixup / cutmix
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
-    if mixup_active and args.use_mixup:
-        mixup_fn = Mixup(
-            mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
-            prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
-            label_smoothing=args.smoothing, num_classes=args.batch_size_per_gpu)
+    if 0 and mixup_active and args.use_mixup:
+        mixup_fn = None#Mixup(
+            #mixup_alpha=args.mixup, cutmix_alpha=args.cutmix, cutmix_minmax=args.cutmix_minmax,
+            #prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, mode=args.mixup_mode,
+            #label_smoothing=args.smoothing, num_classes=args.batch_size_per_gpu)
 
     # ============ building student and teacher networks ... ============
 
@@ -385,7 +394,8 @@ def train_esvit(args):
     print(f"Student and Teacher are built: they are both {args.arch} network.")
 
     # ============ preparing loss ... ============
-
+    negative_dino_loss = None
+    triplett_loss = DINO_TripletMarginLoss()
     if args.use_dense_prediction: 
         # Both view and region level tasks are considered
         dino_loss = DDINOLoss(
@@ -396,6 +406,15 @@ def train_esvit(args):
             args.warmup_teacher_temp_epochs,
             args.epochs,
         ).cuda()
+        if args.contrastive:
+            negative_dino_loss = DDINOLoss(
+            args.out_dim,
+            sum(args.local_crops_number) + 2,  # total number of crops = 2 global crops + local_crops_number
+            args.warmup_teacher_temp,
+            args.teacher_temp,
+            args.warmup_teacher_temp_epochs,
+            args.epochs,
+            ).cuda()
     else:
         # Only view level task is considered
         dino_loss = DINOLoss(
@@ -406,6 +425,16 @@ def train_esvit(args):
             args.warmup_teacher_temp_epochs,
             args.epochs,
         ).cuda()
+        if args.contrastive:
+            negative_dino_loss = DINOLoss(
+                args.out_dim,
+                sum(args.local_crops_number) + 2,  # total number of crops = 2 global crops + local_crops_number
+                args.warmup_teacher_temp,
+                args.teacher_temp,
+                args.warmup_teacher_temp_epochs,
+                args.epochs,
+            ).cuda()
+            
 
     # ============ preparing optimizer ... ============
     params_groups = utils.get_params_groups(student)
@@ -470,9 +499,9 @@ def train_esvit(args):
         ########data_loader.sampler.set_epoch(epoch)
 
         # ============ training one epoch of EsViT ... ============
-        train_stats = train_one_epoch(student, teacher, teacher_without_ddp, dino_loss,
+        train_stats = train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_dino_loss,
             data_loader, optimizer, lr_schedule, wd_schedule, momentum_schedule,
-            epoch, mixup_fn, fp16_scaler, args)
+            epoch, mixup_fn, fp16_scaler,triplett_loss, args)
 
         # ============ writing logs ... ============
         save_dict = {
@@ -498,9 +527,9 @@ def train_esvit(args):
     print('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loader,
+def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_dino_loss, data_loader,
                     optimizer, lr_schedule, wd_schedule, momentum_schedule, epoch, mixup_fn, 
-                    fp16_scaler, args):
+                    fp16_scaler, triplett_loss, args):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
     for it, (images, _) in enumerate(metric_logger.log_every(data_loader, 10, header)):
@@ -512,9 +541,18 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu
-        images = [im.cuda(non_blocking=True) for im in images]
+        print(len(images), len(images[0]), images[0][0].shape)
+        for iz in images[0]:
+            print(iz.shape)
 
-        # mixup for teacher model output
+        images = [im.cuda(non_blocking=True) for im in images]
+        #input_images = Variable(batch[0]).cuda()
+        #close_images = Variable(batch[1]).cuda()
+        #far_images = Variable(torch.stack(batch[2:], dim=1)).cuda().view(-1, 3, 256, 256)
+        print([i.shape for i in images])
+
+
+        # mixup for teacher model output, only global patches
         teacher_input = images[:2]
         
         if mixup_fn is not None:
@@ -525,7 +563,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
             for samples in images:
                 targets = torch.arange(0, args.batch_size_per_gpu, dtype=torch.long).cuda(non_blocking=True)
                 if n_mix_views < args.num_mixup_views:
-                    samples, targets = mixup_fn(samples, targets)
+                    ###samples, targets = mixup_fn(samples, targets)
                     n_mix_views = n_mix_views + 1
                 else:
                     targets = torch.eye(args.batch_size_per_gpu).cuda(non_blocking=True)
@@ -543,8 +581,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             teacher_output = teacher(teacher_input)  # only the 2 global views pass through the teacher
             student_output = student(student_input)
-            loss = dino_loss(student_output, teacher_output, epoch, targets_mixup)
-
+            positive_loss = dino_loss(student_output, teacher_output, epoch, targets_mixup)
+            loss = 0
+            if args.contrastive:
+                neg_loss = negative_dino_loss(student_output, teacher_output, epoch, targets_mixup)
+                loss = triplett_loss(positive_loss, neg_loss)
+            else:
+                loss = positive_loss
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
 
@@ -775,6 +818,18 @@ class DDINOLoss(nn.Module):
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
         self.center_grid = self.center_grid * self.center_momentum + batch_grid_center * (1 - self.center_momentum)
 
+class DINO_TripletMarginLoss(nn.Module):
+    def __init__(self, margin=3e-2, p = 1):
+        super().__init__()
+        self.dist_f = nn.PairwiseDistance(p = p)
+        self.p = p
+        self.margin = margin
+        super().__init__()
+    def forward(self, pos_output, neg_output):
+        val_vec = torch.max(torch.zeros(pos_output.size(0), device = pos_output.device), self.dist_f(pos_output) - self.dist_f(neg_output) + self.margin)
+
+
+        return val_vec.mean()
 
 
 if __name__ == '__main__':

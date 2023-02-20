@@ -55,7 +55,13 @@ def build_dataloader(args, is_train=True):
         dataset = webvision_dataset(args, transform=transform, is_train=True)
     elif 'openimages_v4' in args.dataset:
         dataset = _build_openimage_dataset(args, transforms=transform, is_train=True)
-
+    elif 'contrastive' in args.dataset:
+        import os
+        print(")))))))))))))))))))))))))))))))))))))))))))")
+        print(os.listdir("."))
+        dataset = CustomDatasetFromImagesESVIT(transform, spacing=1, image_base_folder = "C:/DeadlineStuff/USC/temporal-consistency/vox2_crop_fps25/") 
+        #datasets.ImageFolder(args.data_path, transform=transform)
+        
     else:
         # only support folder format for other datasets
         dataset = datasets.ImageFolder(args.data_path, transform=transform)
@@ -311,3 +317,120 @@ class DataAugmentationDEIT(object):
         for _ in range(self.local_crops_number):
             crops.append(self.local_transfo(image))
         return crops
+
+
+
+
+
+
+
+import pandas as pd
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+from torchvision import transforms
+from torch.utils.data.dataset import Dataset  # For custom datasets
+from torchvision.transforms import ToTensor, Compose, Pad, RandomHorizontalFlip, CenterCrop, RandomCrop, ToPILImage 
+from torchvision.transforms import ToPILImage
+import matplotlib.pyplot as plt
+import os, sys
+import torch
+from tqdm import tqdm
+
+class CustomDatasetFromImagesESVIT(Dataset):
+    def __init__(self, transformations, spacing, image_base_folder = '../vox2_crop_fps25'):
+        """
+        Args:
+            csv_path (string): path to csv file
+            img_path (string): path to the folder where images are
+            transform: pytorch transforms for transforms and tensor conversion
+        """
+        self.image_base_folder = image_base_folder
+        self.seed = np.random.seed(567)
+        self.transform = transformations
+        # Transforms
+        self.to_tensor = transforms.ToTensor()
+        # Read the csv file
+        self.video_label = sorted(os.listdir(self.image_base_folder))
+        frame_index = []
+        self.video_label_suff = []
+
+        length = spacing * 10 + 1
+
+        for video in tqdm(self.video_label):
+            path = self.image_base_folder + '/' + video
+            frames = sorted(os.listdir(path), key=lambda x: int(x[:-4]))
+
+            if len(frames) - length> 0:
+                index = np.random.choice(range(len(frames) - length), size=1)
+                frame_index.append(index)
+                self.video_label_suff.append(video)
+
+
+        self.frame_index = frame_index
+        # Calculate len
+        self.data_len = len(self.video_label_suff)
+        self.spacing = spacing
+
+
+    def __getitem__(self, index):
+        # Get image name from the pandas df
+        video_off = int(index % 1)
+        video_base_index = int((index - video_off) / 1)
+        anchor_index = self.frame_index[video_base_index][video_off]
+        pos_index = anchor_index + 1
+
+        path = self.image_base_folder + '/' + self.video_label_suff[video_base_index]
+        frames = sorted(os.listdir(path), key=lambda x: int(x[:-4]))
+        random_frame = frames[anchor_index]
+        close_frame = frames[pos_index]
+
+        far_frame_name_list = []
+
+        for i in range(1,11):
+            neg_index = i * self.spacing + anchor_index + 1
+            far_frame = frames[neg_index]
+            far_name = path + '/' + far_frame
+            far_frame_name_list.append(far_name)
+
+        source_name = path + '/' + random_frame
+        close_name = path + '/' + close_frame
+        
+        # Open image
+        try:
+            s_img = Image.open(source_name)
+            c_img = Image.open(close_name)
+
+
+            f_imgs = []
+            for far in far_frame_name_list:
+                f_img = Image.open(far)
+                f_imgs.append(f_img)
+     
+        except FileNotFoundError:
+            print("sample missing use first")
+            return self.__getitem__(0)
+
+        imgs = [0] * 12
+        img_s = self.transform(s_img)
+        imgs[0] = img_s
+
+        img_c = self.transform(c_img)
+        imgs[1] = img_c
+
+        for i in range(10):
+            img_f = self.transform(f_imgs[i])
+            imgs[2+i] = img_f
+        single_image_label = self.video_label_suff[video_base_index]
+        print(f"len: {len(imgs)}")
+        print(f"imgs: {[[j.shape for j in i] for i in imgs]}")
+
+        
+
+
+        return (imgs, single_image_label)
+
+    def __len__(self):
+        return self.data_len

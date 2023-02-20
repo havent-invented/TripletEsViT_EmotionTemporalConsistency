@@ -16,7 +16,7 @@ from tqdm import tqdm
 image_base_folder = '../vox2_crop_fps25'
 
 class CustomDatasetFromImages(Dataset):
-    def __init__(self, transformations, spacing):
+    def __init__(self, transformations, spacing, image_base_folder = '../vox2_crop_fps25'):
         """
         Args:
             csv_path (string): path to csv file

@@ -106,7 +106,7 @@ def tuplet_loss(anchor, close, sequence):
     
 
 torch.manual_seed(args.random_seed)
-combine_sets = CustomDatasetFromImages(transformations, spacing=args.spacing_size)
+combine_sets = CustomDatasetFromImages(transformations, spacing=args.spacing_size, image_base_folder = image_base_folder)
 train_size = int(0.8 * len(combine_sets))
 test_size = len(combine_sets) - train_size
 train_dataset, test_dataset = torch.utils.data.random_split(combine_sets, [train_size, test_size])

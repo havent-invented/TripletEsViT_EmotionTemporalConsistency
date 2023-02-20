@@ -1,0 +1,6 @@
+python triplet_rank_train.py --encoder_arc swin_v2_t --batch_size 4  
+python triplet_rank_train.py --encoder_arc resnet18_encoder
+python triplet_rank_train.py --encoder_arc mobilenet_encoder --batch_size 4 
+python triplet_rank_train.py --encoder_arc densenet121_encoder --batch_size 4  
+python triplet_rank_train.py --encoder_arc efficientnet_b0 --batch_size 4  
+python triplet_rank_train.py --encoder_arc regnet_x_400mf --batch_size 4  

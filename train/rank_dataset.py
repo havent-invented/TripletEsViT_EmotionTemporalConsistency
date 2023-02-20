@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset  # For custom datasets
-from torchvision.transforms import ToTensor, Scale, Compose, Pad, RandomHorizontalFlip, CenterCrop, RandomCrop, Scale, ToPILImage 
+from torchvision.transforms import ToTensor, Compose, Pad, RandomHorizontalFlip, CenterCrop, RandomCrop, ToPILImage 
 from torchvision.transforms import ToPILImage
 import matplotlib.pyplot as plt
 import os, sys

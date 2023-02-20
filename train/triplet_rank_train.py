@@ -10,12 +10,16 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 from torchvision import models
 from rank_dataset import CustomDatasetFromImages
-from torchvision.transforms import ToTensor, Scale, Compose, Pad, RandomHorizontalFlip, CenterCrop, RandomCrop, Scale, ToPILImage 
+from torchvision.transforms import ToTensor, Resize, Compose, Pad, RandomHorizontalFlip, CenterCrop, RandomCrop, ToPILImage 
 from torchvision.transforms import ToPILImage
 import sys
 from tqdm import tqdm
-from model import resnet18_encoder, densenet121_encoder, mobilenet_encoder
+from model import resnet18_encoder, densenet121_encoder, mobilenet_encoder,regnet_x_400mf_encoder, efficientnet_b0_encoder,swin_v2_t_encoder
 import argparse
+import torchvision.transforms as T
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+import torchvision.models
 
 os.environ['CUDA_VISIBLE_DEVICES']='0,1'
 
@@ -28,6 +32,9 @@ arguments.add_argument('--batch_size', type=int, default=48)
 arguments.add_argument('--num_epoch', type=int, default=50)
 arguments.add_argument('--spacing_size', type=int, default=1)
 arguments.add_argument('--random_seed', type=int, default=123)
+arguments.add_argument('--encoder_arc', type=str, default="resnet18_encoder")
+arguments.add_argument('--optimizer', type=str, default="SGD")
+arguments.add_argument('--add_augs', type=bool, default=False)
 args = arguments.parse_args()
 
 
@@ -43,12 +50,17 @@ crop = 200
 rng = np.random.RandomState(args.random_seed)
 precrop = crop + 24
 crop = rng.randint(crop, precrop)
+
+jitter_aug = T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1)
+rot_aug = T.RandomRotation(degrees=(-30, 30))
+
 transformations = Compose([
-            Scale((256,256)),
-            Pad((24,24,24,24)),
-            CenterCrop(precrop),
+            Resize((256,256)),
+            Pad((24,24,24,24))] + 
+            ([jitter_aug, rot_aug] if args.add_augs else []) 
+            + [CenterCrop(precrop),
             RandomCrop(crop),
-            Scale((256,256)), 
+            Resize((256,256)), 
             ToTensor(),
             normalize])
 
@@ -74,6 +86,10 @@ def criterion_cos2(input_f, target_f):
     return cos(input_f, target_f)
 
 def tuplet_loss(anchor, close, sequence):
+    """
+    N-tupled Loss
+    one positive, multiple negative samples
+    """
     delta = 3e-2 * torch.ones(anchor.size(0), device='cuda')
     # N x 10 x 256
     anchors = torch.unsqueeze(anchor, dim=1)  
@@ -102,18 +118,53 @@ train_dataset_loader = torch.utils.data.DataLoader(dataset=train_dataset,
 test_dataset_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                                 batch_size=batch_size,
                                                 shuffle=True, num_workers = args.num_workers)
+model = None
+if args.encoder_arc == "resnet18_encoder":#2015
+    model = resnet18_encoder()
+elif args.encoder_arc == "mobilenet_encoder":#2018
+    model = mobilenet_encoder()
+elif args.encoder_arc == "densenet121_encoder":#2016
+    model = densenet121_encoder()
 
 
-model = resnet18_encoder()
-model = torch.nn.DataParallel(model, device_ids=[0,1])
+
+
+elif args.encoder_arc == "swin_v2_t":#2022
+    model = swin_v2_t_encoder()#efficientnet_b0_encoder, efficientnet_b0_encoder,swin_v2_t_encoder#torchvision.models.swin_v2_t()
+elif args.encoder_arc == "efficientnet_b0":#2019
+    model = efficientnet_b0_encoder() #torchvision.models.efficientnet_b0()
+elif args.encoder_arc == "regnet_x_400mf":
+    model = regnet_x_400mf_encoder()#torchvision.models.regnet_x_400mf()
+#elif args.encoder_arc == "regnet_y_400mf":#2020
+    #model = torchvision.models.regnet_y_400mf()
+#elif args.encoder_arc == "shufflenet_v2_x1_0":
+    #model = torchvision.models.shufflenet_v2_x1_0()
+#elif args.encoder_arc == "shufflenet_v2_x0_5":#2018
+    #model = torchvision.models.shufflenet_v2_x0_5()
+
+
+"""
+ output = nn.functional.adaptive_avg_pool2d(output, 1).reshape(output.shape[0], -1)
+        output = torch.flatten(output, 1)
+        output = self.fc1(output)
+        output = F.normalize(output, p=2, dim=1)
+
+"""
+#model = torch.nn.DataParallel(model, device_ids=[0,1])
 model.cuda()
 
-optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-
+if args.optimizer == "SGD":
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+elif args.optimizer == "Adam":
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+elif args.optimizer == "AdamW":
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
 train_loss_list = []
 test_acc_list = []
 test_loss_list = []
+
+
 
 
 def checkpoint(model, my_save_path, epoch):
@@ -127,6 +178,7 @@ def checkpoint(model, my_save_path, epoch):
 
     torch.save(checkpoint_state, final_save_path)
 
+scheduler = CosineAnnealingLR(optimizer, T_max = args.num_epoch * len(train_dataset_loader), eta_min=0.0001)
 
 def train_model(model, epoches):
     total_loss = 0
@@ -143,6 +195,7 @@ def train_model(model, epoches):
         loss = tuplet_loss(input_emb, close_emb, far_emb)
         loss.backward()
         optimizer.step()
+        scheduler.step()
         total_loss += loss.cpu().detach().numpy()
 
     total_loss = total_loss * 1.0 / len(train_dataset_loader)

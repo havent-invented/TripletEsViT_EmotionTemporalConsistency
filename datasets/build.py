@@ -267,6 +267,7 @@ class DataAugmentationDINO(object):
             # print(n_crop)
             for _ in range(n_crop):
                 crops.append(self.local_transfo[i](image))
+        #print(f"crop: {crops[-1].shape}")
         return crops
 
 
@@ -424,13 +425,17 @@ class CustomDatasetFromImagesESVIT(Dataset):
             img_f = self.transform(f_imgs[i])
             imgs[2+i] = img_f
         single_image_label = self.video_label_suff[video_base_index]
-        print(f"len: {len(imgs)}")
-        print(f"imgs: {[[j.shape for j in i] for i in imgs]}")
+        #print(f"len: {len(imgs)}")
+        #print(f"imgs: {[[j.shape for j in i] for i in imgs]}")
+
+        n_views = len(imgs[0])
+        imgs_2 = []
+        for v_i in range(n_views):
+            imgs_2 += [torch.stack([im_1[v_i] for im_1 in imgs], dim = 0)]
 
         
-
-
-        return (imgs, single_image_label)
+        print(f"VV:{[i.shape for i in imgs_2]}")
+        return (imgs_2, single_image_label)
 
     def __len__(self):
         return self.data_len

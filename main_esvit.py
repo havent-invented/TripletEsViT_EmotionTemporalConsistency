@@ -578,15 +578,44 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_d
             targets_mixup = None
 
         # teacher and student forward passes + compute dino loss
+        
+        #print(f"1student_input:{len(student_input)} {student_input[0].shape}")
+        #print(f"1teacher_input:{len(teacher_input)} {teacher_input[0].shape}")
         with torch.cuda.amp.autocast(fp16_scaler is not None):
-            teacher_output = teacher(teacher_input)  # only the 2 global views pass through the teacher
-            student_output = student(student_input)
-            positive_loss = dino_loss(student_output, teacher_output, epoch, targets_mixup)
             loss = 0
             if args.contrastive:
-                neg_loss = negative_dino_loss(student_output, teacher_output, epoch, targets_mixup)
-                loss = triplett_loss(positive_loss, neg_loss)
+                student_input_anc = [s[:,0] for s in student_input]
+                teacher_input_anc = [s[:,0] for s in teacher_input]
+                teacher_output = teacher(teacher_input_anc)
+                student_output = student(student_input_anc)
+
+                #using only one positive and one negative
+                s_pos_in =  [s[:,1] for s in student_input]
+                t_pos_in =  [s[:,1] for s in teacher_input]
+                s_pos_out = student(s_pos_in)
+                t_pos_out = teacher(t_pos_in)
+
+                s_neg_in =  [s[:,-1] for s in student_input]
+                t_neg_in =  [s[:,-1] for s in teacher_input]
+                s_neg_out = student(s_neg_in)
+                t_neg_out = teacher(t_neg_in)
+
+                pos_losses = [dino_loss(student_output, teacher_output, epoch, targets_mixup),
+                    dino_loss(student_output, t_pos_out, epoch, targets_mixup), 
+                    dino_loss(s_pos_out, teacher_output, epoch, targets_mixup),
+                    dino_loss(s_pos_out, t_pos_out, epoch, targets_mixup),]
+                neg_losses = [-negative_dino_loss(student_output, t_neg_out, epoch, targets_mixup),
+                -negative_dino_loss(s_neg_out, teacher_output, epoch, targets_mixup),]
+
+                for pos_loss in pos_losses:
+                    loss += pos_loss#triplett_loss(positive_loss, neg_loss)
+                for neg_loss in neg_losses:
+                    loss += neg_loss
             else:
+                 #print(f"2student_input:{len(student_input)} {student_input[0].shape}")#print(f"2teacher_input:{len(teacher_input)} {teacher_input[0].shape}")
+                teacher_output = teacher(teacher_input)  # only the 2 global views pass through the teacher
+                student_output = student(student_input)
+                positive_loss = dino_loss(student_output, teacher_output, epoch, targets_mixup)
                 loss = positive_loss
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)

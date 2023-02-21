@@ -434,7 +434,6 @@ class CustomDatasetFromImagesESVIT(Dataset):
             imgs_2 += [torch.stack([im_1[v_i] for im_1 in imgs], dim = 0)]
 
         
-        print(f"VV:{[i.shape for i in imgs_2]}")
         return (imgs_2, single_image_label)
 
     def __len__(self):

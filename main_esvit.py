@@ -208,6 +208,8 @@ def get_args_parser():
                         default=None,
                         nargs=argparse.REMAINDER)    
 
+    parser.add_argument('--additional_triplet_loss', default=0, type=int, help='additional_triplet_loss.')
+
 
 
 
@@ -541,15 +543,15 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_d
                 param_group["weight_decay"] = wd_schedule[it]
 
         # move images to gpu
-        print(len(images), len(images[0]), images[0][0].shape)
-        for iz in images[0]:
-            print(iz.shape)
+        ####print(len(images), len(images[0]), images[0][0].shape)
+        ####for iz in images[0]:
+            ####print(iz.shape)
 
         images = [im.cuda(non_blocking=True) for im in images]
         #input_images = Variable(batch[0]).cuda()
         #close_images = Variable(batch[1]).cuda()
         #far_images = Variable(torch.stack(batch[2:], dim=1)).cuda().view(-1, 3, 256, 256)
-        print([i.shape for i in images])
+        ####print([i.shape for i in images])
 
 
         # mixup for teacher model output, only global patches
@@ -583,6 +585,14 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_d
         #print(f"1teacher_input:{len(teacher_input)} {teacher_input[0].shape}")
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             loss = 0
+
+            if args.dataset == 'contrastive':
+                student_input_anc = [s[:,0] for s in student_input]
+                teacher_input_anc = [s[:,0] for s in teacher_input]
+            else:
+                student_input_anc = student_input
+                teacher_input_anc = teacher_input
+
             if args.contrastive:
                 student_input_anc = [s[:,0] for s in student_input]
                 teacher_input_anc = [s[:,0] for s in teacher_input]
@@ -607,16 +617,42 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, negative_d
                 neg_losses = [-negative_dino_loss(student_output, t_neg_out, epoch, targets_mixup),
                 -negative_dino_loss(s_neg_out, teacher_output, epoch, targets_mixup),]
 
+                Tloss = nn.TripletMarginLoss()
                 for pos_loss in pos_losses:
-                    loss += pos_loss#triplett_loss(positive_loss, neg_loss)
+                    loss += pos_loss / len(neg_losses)#triplett_loss(positive_loss, neg_loss)
                 for neg_loss in neg_losses:
-                    loss += neg_loss
+                    loss += neg_loss / len(neg_losses)
+                    
+                
             else:
-                 #print(f"2student_input:{len(student_input)} {student_input[0].shape}")#print(f"2teacher_input:{len(teacher_input)} {teacher_input[0].shape}")
-                teacher_output = teacher(teacher_input)  # only the 2 global views pass through the teacher
-                student_output = student(student_input)
+                teacher_output = teacher(teacher_input_anc)  # only the 2 global views pass through the teacher
+                student_output = student(student_input_anc)
                 positive_loss = dino_loss(student_output, teacher_output, epoch, targets_mixup)
                 loss = positive_loss
+            
+            if args.additional_triplet_loss and not args.contrastive:
+                s_pos_in =  [s[:,1] for s in student_input]
+                t_pos_in =  [s[:,1] for s in teacher_input]
+                s_pos_out = student(s_pos_in)
+                t_pos_out = teacher(t_pos_in)
+
+                s_neg_in =  [s[:,-1] for s in student_input]
+                t_neg_in =  [s[:,-1] for s in teacher_input]
+                s_neg_out = student(s_neg_in)
+                t_neg_out = teacher(t_neg_in)
+
+            if args.additional_triplet_loss == 0:
+                pass
+            if args.additional_triplet_loss == 1:
+                loss += Tloss(teacher_output[0], t_pos_out[0], t_neg_out[0])
+                loss += Tloss(student_output[0], s_pos_out[0], s_neg_out[0])
+            elif args.additional_triplet_loss == 2:
+                loss += Tloss(teacher_output[0], t_pos_out[0], t_neg_out[0])
+                loss += Tloss(student_output[0], s_pos_out[0], s_neg_out[0])
+
+                loss += Tloss(teacher_output[1], t_pos_out[1], t_neg_out[1])
+                loss += Tloss(student_output[1], s_pos_out[1], s_neg_out[1])
+
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
 
@@ -866,3 +902,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     train_esvit(args)
+
+
+

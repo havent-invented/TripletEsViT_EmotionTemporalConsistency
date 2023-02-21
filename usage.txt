@@ -2,3 +2,6 @@ contrastive:
 python main_esvit.py --arch swin_tiny --data_path data/train --output_dir $OUT_PATH --batch_size_per_gpu 4 --epochs 300 --teacher_temp 0.07 --warmup_epochs 10 --warmup_teacher_temp_epochs 30 --norm_last_layer false --use_dense_prediction True --cfg experiments/imagenet/swin/swin_tiny_patch4_window7_224.yaml    --sampler No --use_mixup False   --contrastive True --dataset contrastive
 non-contrastive:
 python main_esvit.py --arch swin_tiny --data_path data/train --output_dir $OUT_PATH --batch_size_per_gpu 4 --epochs 300 --teacher_temp 0.07 --warmup_epochs 10 --warmup_teacher_temp_epochs 30 --norm_last_layer false --use_dense_prediction True --cfg experiments/imagenet/swin/swin_tiny_patch4_window7_224.yaml    --sampler No --use_mixup False   --contrastive False --dataset imagenet22k
+
+contrastive + additional_triplet_loss
+python main_esvit.py --arch swin_tiny --data_path data/train --output_dir $OUT_PATH --batch_size_per_gpu 4 --epochs 300 --teacher_temp 0.07 --warmup_epochs 10 --warmup_teacher_temp_epochs 30 --norm_last_layer false --use_dense_prediction True --cfg experiments/imagenet/swin/swin_tiny_patch4_window7_224.yaml    --sampler No --use_mixup False   --contrastive True --dataset contrastive --additional_triplet_loss 2
